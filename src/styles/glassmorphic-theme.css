@@ -1,0 +1,566 @@
+/* Glassmorphic Theme for Multi-Agent RAG Dashboard
+   A professional, modern UI with frosted glass effects */
+
+   :root {
+    /* Color palette */
+    --glass-primary: rgba(59, 130, 246, 0.9);
+    --glass-primary-light: rgba(59, 130, 246, 0.15);
+    --glass-secondary: rgba(16, 185, 129, 0.9);
+    --glass-secondary-light: rgba(16, 185, 129, 0.15);
+    --glass-accent: rgba(139, 92, 246, 0.9);
+    --glass-accent-light: rgba(139, 92, 246, 0.15);
+    --glass-danger: rgba(239, 68, 68, 0.9);
+    --glass-danger-light: rgba(239, 68, 68, 0.15);
+    
+    /* Background gradients */
+    --glass-bg-gradient: linear-gradient(135deg, rgba(49, 46, 129, 0.6), rgba(79, 70, 229, 0.3));
+    --glass-card-gradient: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+    
+    /* Text colors */
+    --glass-text-light: rgba(255, 255, 255, 0.95);
+    --glass-text-medium: rgba(255, 255, 255, 0.75);
+    --glass-text-dark: rgba(15, 23, 42, 0.9);
+    
+    /* Borders */
+    --glass-border: 1px solid rgba(255, 255, 255, 0.18);
+    --glass-border-dark: 1px solid rgba(255, 255, 255, 0.08);
+    
+    /* Shadows */
+    --glass-shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
+    --glass-shadow: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.08);
+    --glass-shadow-lg: 0 20px 25px rgba(0, 0, 0, 0.1), 0 10px 10px rgba(0, 0, 0, 0.04);
+    
+    /* Glows */
+    --glass-glow-primary: 0 0 15px rgba(59, 130, 246, 0.5);
+    --glass-glow-secondary: 0 0 15px rgba(16, 185, 129, 0.5);
+    --glass-glow-accent: 0 0 15px rgba(139, 92, 246, 0.5);
+  }
+  
+  /* Base styles */
+  body, html {
+    background: var(--glass-bg-gradient), url('/bg-pattern.png');
+    background-attachment: fixed;
+    color: var(--glass-text-dark);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  
+  /* App container */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+  }
+  
+  /* Glassmorphic Navbar */
+  .navbar {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: var(--glass-border);
+    box-shadow: var(--glass-shadow-sm);
+  }
+  
+  .navbar-brand {
+    color: var(--glass-text-light);
+    font-weight: 600;
+  }
+  
+  .navbar-link {
+    color: var(--glass-text-medium);
+    transition: color 0.2s ease;
+  }
+  
+  .navbar-link:hover {
+    color: var(--glass-text-light);
+  }
+  
+  .navbar-button {
+    background: rgba(59, 130, 246, 0.2);
+    border: var(--glass-border);
+    color: var(--glass-text-light);
+    backdrop-filter: blur(8px);
+    transition: all 0.3s ease;
+  }
+  
+  .navbar-button:hover {
+    background: rgba(59, 130, 246, 0.3);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .navbar-button.secondary {
+    background: rgba(16, 185, 129, 0.2);
+  }
+  
+  .navbar-button.secondary:hover {
+    background: rgba(16, 185, 129, 0.3);
+    box-shadow: var(--glass-glow-secondary);
+  }
+  
+  .navbar-button.transparent {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  .navbar-button.github {
+    background: rgba(24, 23, 23, 0.3);
+  }
+  
+  /* Glassmorphic Sidebar */
+  .sidebar {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-right: var(--glass-border);
+    box-shadow: var(--glass-shadow-sm);
+  }
+  
+  .palette-title, .workflow-title, .config-title {
+    color: var(--glass-text-light);
+    border-bottom: var(--glass-border-dark);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .palette-description {
+    color: var(--glass-text-medium);
+  }
+  
+  /* Agent templates */
+  .agent-template {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow-sm);
+    transition: all 0.3s ease;
+  }
+  
+  .agent-template:hover {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: var(--glass-shadow);
+    transform: translateY(-2px);
+  }
+  
+  .agent-template-name {
+    color: var(--glass-text-light);
+  }
+  
+  .agent-template-description {
+    color: var(--glass-text-medium);
+  }
+  
+  /* Form elements */
+  .form-group label {
+    color: var(--glass-text-light);
+  }
+  
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    background: rgba(255, 255, 255, 0.07);
+    border: var(--glass-border);
+    color: var(--glass-text-light);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
+  
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .tools-checkbox-group {
+    background: rgba(255, 255, 255, 0.05);
+    border: var(--glass-border);
+  }
+  
+  .tool-checkbox label {
+    color: var(--glass-text-light);
+  }
+  
+  .tool-description {
+    color: var(--glass-text-medium);
+  }
+  
+  /* Buttons */
+  .save-button,
+  .run-task-button,
+  .workflow-action-button {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: var(--glass-border);
+    transition: all 0.3s ease;
+  }
+  
+  .save-button {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--glass-text-light);
+  }
+  
+  .save-button:hover {
+    background: rgba(59, 130, 246, 0.3);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .run-button, 
+  .run-task-button {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--glass-text-light);
+  }
+  
+  .run-button:hover,
+  .run-task-button:hover {
+    background: rgba(16, 185, 129, 0.3);
+    box-shadow: var(--glass-glow-secondary);
+  }
+  
+  .clear-button {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--glass-text-medium);
+  }
+  
+  .clear-button:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+  
+  .export-button {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--glass-text-light);
+  }
+  
+  .export-button:hover {
+    background: rgba(139, 92, 246, 0.3);
+    box-shadow: var(--glass-glow-accent);
+  }
+  
+  /* Glassmorphic Canvas */
+  .canvas-container {
+    background: rgba(15, 23, 42, 0.2);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+  
+  /* Node styles */
+  .agent-node {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    transition: all 0.3s ease;
+  }
+  
+  .agent-node:hover {
+    box-shadow: var(--glass-shadow-lg);
+  }
+  
+  .agent-node.selected {
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .agent-node-content {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  
+  .agent-node-role {
+    color: var(--glass-text-light);
+  }
+  
+  .tool-badge {
+    background: rgba(255, 255, 255, 0.1);
+    border: var(--glass-border-dark);
+    color: var(--glass-text-medium);
+  }
+  
+  /* Handle styles */
+  .handle {
+    background: rgba(255, 255, 255, 0.2);
+    border: var(--glass-border);
+  }
+  
+  .handle.source-handle {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+  }
+  
+  .handle.target-handle {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+  }
+  
+  /* Canvas controls */
+  .canvas-controls {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  
+  .canvas-control-button {
+    background: rgba(255, 255, 255, 0.1);
+    border: var(--glass-border-dark);
+    color: var(--glass-text-light);
+  }
+  
+  .canvas-control-button:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+  
+  .canvas-control-button.active {
+    background: rgba(59, 130, 246, 0.2);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  /* Node toolbar */
+  .node-toolbar {
+    padding: 0.5rem;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 8px;
+  }
+  
+  .toolbar-button {
+    background: rgba(255, 255, 255, 0.1);
+    border: var(--glass-border-dark);
+    color: var(--glass-text-light);
+  }
+  
+  .toolbar-button.primary {
+    background: rgba(59, 130, 246, 0.2);
+  }
+  
+  .toolbar-button.primary:hover {
+    background: rgba(59, 130, 246, 0.3);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .toolbar-button.secondary {
+    background: rgba(16, 185, 129, 0.2);
+  }
+  
+  .toolbar-button.secondary:hover {
+    background: rgba(16, 185, 129, 0.3);
+    box-shadow: var(--glass-glow-secondary);
+  }
+  
+  /* Glassmorphic Chat Interface */
+  .chat-interface {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-left: var(--glass-border);
+    box-shadow: var(--glass-shadow-sm);
+  }
+  
+  .chat-header {
+    border-bottom: var(--glass-border-dark);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  
+  .chat-header h2 {
+    color: var(--glass-text-light);
+  }
+  
+  .workflow-status {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+  
+  .workflow-status.failed {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  
+  .file-upload-area {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: var(--glass-border-dark);
+  }
+  
+  .chat-messages {
+    padding: 1.5rem;
+  }
+  
+  .message-content {
+    box-shadow: var(--glass-shadow-sm);
+  }
+  
+  .message-content.user {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+  
+  .message-content.agent {
+    background: rgba(255, 255, 255, 0.07);
+    border: var(--glass-border-dark);
+  }
+  
+  .message-content.system {
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+  }
+  
+  .message-content.error {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  
+  .chat-input-form {
+    background: rgba(255, 255, 255, 0.03);
+    border-top: var(--glass-border-dark);
+  }
+  
+  .chat-input-form input {
+    background: rgba(255, 255, 255, 0.07);
+    border: var(--glass-border);
+    color: var(--glass-text-light);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
+  
+  .chat-input-form input:focus {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  .chat-input-form button {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: var(--glass-text-light);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
+  
+  .chat-input-form button:hover {
+    background: rgba(59, 130, 246, 0.3);
+    box-shadow: var(--glass-glow-primary);
+  }
+  
+  /* File upload component */
+  .dropzone {
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+  }
+  
+  .dropzone:hover, .dropzone.active {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(59, 130, 246, 0.4);
+  }
+  
+  .upload-icon {
+    color: var(--glass-text-medium);
+  }
+  
+  .upload-hint {
+    color: var(--glass-text-medium);
+  }
+  
+  .uploaded-files-list {
+    background: rgba(255, 255, 255, 0.05);
+    border: var(--glass-border);
+  }
+  
+  .files-header {
+    background: rgba(255, 255, 255, 0.07);
+    border-bottom: var(--glass-border-dark);
+  }
+  
+  .files-header h4 {
+    color: var(--glass-text-light);
+  }
+  
+  .file-item {
+    border-bottom: var(--glass-border-dark);
+  }
+  
+  .file-name {
+    color: var(--glass-text-light);
+  }
+  
+  .file-size {
+    color: var(--glass-text-medium);
+  }
+  
+  /* Status indicators */
+  .backend-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--glass-text-medium);
+  }
+  
+  .backend-status .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--glass-text-medium);
+  }
+  
+  .backend-status.online .status-indicator {
+    background: rgba(16, 185, 129, 0.9);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  }
+  
+  .backend-status.offline .status-indicator {
+    background: rgba(239, 68, 68, 0.9);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+  }
+  
+  .backend-status.error .status-indicator {
+    background: rgba(245, 158, 11, 0.9);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+  }
+  
+  /* Media queries for responsiveness */
+  @media (max-width: 768px) {
+    .sidebar {
+      width: 100%;
+      position: absolute;
+      z-index: 10;
+      height: auto;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+    }
+    
+    .sidebar.open {
+      transform: translateX(0);
+    }
+    
+    .canvas-container {
+      width: 100%;
+    }
+    
+    .chat-interface {
+      width: 100%;
+      position: absolute;
+      z-index: 10;
+      height: auto;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+    }
+    
+    .chat-interface.open {
+      transform: translateX(0);
+    }
+  }
+  
+  /* For Safari compatibility */
+  @supports not (backdrop-filter: blur(10px)) {
+    .navbar, .sidebar, .agent-node, .canvas-controls, .chat-interface {
+      background: rgba(15, 23, 42, 0.85);
+    }
+    
+    .form-group input, .form-group textarea, .form-group select,
+    .dropzone, .uploaded-files-list {
+      background: rgba(30, 41, 59, 0.8);
+    }
+  }
