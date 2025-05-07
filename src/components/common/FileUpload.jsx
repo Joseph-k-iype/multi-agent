@@ -1,11 +1,20 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { FaFileUpload, FaFile, FaFilePdf, FaFileWord, FaFileCsv, FaFileExcel, FaFileCode } from 'react-icons/fa';
+import { useFileStore } from '../../stores/fileStore';
 
 const FileUpload = ({ onFileUpload }) => {
-  const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isLocalUploading, setIsLocalUploading] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Use the fileStore
+  const { 
+    files, 
+    isUploading, 
+    uploadProgress,
+    uploadFiles,
+    clearFiles 
+  } = useFileStore();
 
   // Get appropriate icon based on file type
   const getFileIcon = (filename) => {
@@ -36,23 +45,23 @@ const FileUpload = ({ onFileUpload }) => {
 
   const onDrop = useCallback(async (acceptedFiles) => {
     try {
-      setIsUploading(true);
       setError(null);
+      setIsLocalUploading(true);
       
-      // Add to local state for UI display
-      setUploadedFiles(prev => [...prev, ...acceptedFiles]);
-      
-      // Call parent handler to actually upload the files
+      // Use the parent callback if provided (for custom handling)
       if (onFileUpload) {
         await onFileUpload(acceptedFiles);
+      } else {
+        // Otherwise use the uploadFiles from store
+        await uploadFiles(acceptedFiles);
       }
       
-      setIsUploading(false);
+      setIsLocalUploading(false);
     } catch (err) {
       setError(err.message || 'Error uploading files');
-      setIsUploading(false);
+      setIsLocalUploading(false);
     }
-  }, [onFileUpload]);
+  }, [onFileUpload, uploadFiles]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -70,15 +79,11 @@ const FileUpload = ({ onFileUpload }) => {
     multiple: true
   });
 
-  const clearFiles = () => {
-    setUploadedFiles([]);
-  };
-
   return (
     <div className="file-upload-container">
       <div 
         {...getRootProps()} 
-        className={`dropzone ${isDragActive ? 'active' : ''} ${isUploading ? 'uploading' : ''}`}
+        className={`dropzone ${isDragActive ? 'active' : ''} ${isUploading || isLocalUploading ? 'uploading' : ''}`}
       >
         <input {...getInputProps()} />
         
@@ -103,36 +108,44 @@ const FileUpload = ({ onFileUpload }) => {
         </div>
       )}
 
-      {isUploading && (
+      {(isUploading || isLocalUploading) && (
         <div className="upload-progress">
           <p>Uploading files...</p>
           <div className="progress-bar">
-            <div className="progress-indicator" />
+            <div 
+              className="progress-indicator" 
+              style={{ width: `${uploadProgress || 0}%` }}
+            />
           </div>
         </div>
       )}
 
-      {uploadedFiles.length > 0 && (
+      {files.length > 0 && (
         <div className="uploaded-files-list">
           <div className="files-header">
-            <h4>Uploaded Files</h4>
+            <h4>Uploaded Files ({files.length})</h4>
             <button 
               className="clear-files-btn" 
               onClick={clearFiles}
-              disabled={isUploading}
+              disabled={isUploading || isLocalUploading}
             >
               Clear All
             </button>
           </div>
           
           <ul>
-            {uploadedFiles.map((file, index) => (
-              <li key={index} className="file-item">
-                {getFileIcon(file.name)}
-                <span className="file-name">{file.name}</span>
-                <span className="file-size">({(file.size / 1024).toFixed(2)} KB)</span>
+            {files.slice(0, 5).map((file, index) => (
+              <li key={file.id || index} className="file-item">
+                {getFileIcon(file.original_name || file.name)}
+                <span className="file-name">{file.original_name || file.name}</span>
+                <span className="file-size">({((file.size || 0) / 1024).toFixed(2)} KB)</span>
               </li>
             ))}
+            {files.length > 5 && (
+              <li className="file-item view-more">
+                <span>And {files.length - 5} more files...</span>
+              </li>
+            )}
           </ul>
         </div>
       )}

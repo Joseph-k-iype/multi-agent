@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { workflowApi } from '../api/workflowApi';
 
-const WorkflowContext = createContext(null);
+// Create the context
+export const WorkflowContext = createContext(null);
 
 export const WorkflowProvider = ({ children }) => {
   const [nodes, setNodes] = useState([]);
@@ -175,6 +176,7 @@ export const WorkflowProvider = ({ children }) => {
     isRunning,
     workflowResult,
     error,
+    setError,
     saveWorkflow,
     runWorkflow,
     clearWorkflow,
@@ -187,10 +189,4 @@ export const WorkflowProvider = ({ children }) => {
   );
 };
 
-export const useWorkflow = () => {
-  const context = useContext(WorkflowContext);
-  if (!context) {
-    throw new Error('useWorkflow must be used within a WorkflowProvider');
-  }
-  return context;
-};
+export default WorkflowContext;

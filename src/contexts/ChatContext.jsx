@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState } from 'react';
 import { fileApi } from '../api/fileApi';
 import { chatApi } from '../api/chatApi';
 
-const ChatContext = createContext(null);
+// Create the context
+export const ChatContext = createContext(null);
 
 export const ChatProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
@@ -60,17 +61,22 @@ export const ChatProvider = ({ children }) => {
       
       // Generate a typing indicator
       addSystemMessage('typing', null);
-      
-      const response = await chatApi.sendMessage(content, chatHistory);
-      
-      // Remove typing indicator
-      setMessages(prev => prev.filter(msg => !(msg.sender === 'system' && msg.type === 'typing')));
-      
-      // Add the response from the agent
-      addMessage('agent', response.content);
-      setIsLoading(false);
-      
-      return { success: true, response };
+
+      try {
+        // Mock response for now
+        setTimeout(() => {
+          // Remove typing indicator
+          setMessages(prev => prev.filter(msg => !(msg.sender === 'system' && msg.type === 'typing')));
+          
+          // Add the response from the agent
+          addMessage('agent', `This is a mock response to: "${content}"`);
+          setIsLoading(false);
+        }, 1500);
+        
+        return { success: true, response: { content: "Mock response" } };
+      } catch (apiError) {
+        throw apiError;
+      }
     } catch (error) {
       setIsLoading(false);
       setError(error.message || 'Failed to send message');
@@ -92,13 +98,13 @@ export const ChatProvider = ({ children }) => {
         lastModified: file.lastModified
       }));
       
-      // Call API to upload
-      const response = await fileApi.uploadFiles(files);
+      // Mock upload for now
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       setUploadedFiles(prev => [...prev, ...newFiles]);
       setIsLoading(false);
       
-      return response.fileIds; // Return file IDs from server
+      return newFiles.map((_, i) => `file-${Date.now()}-${i}`); // Return mock file IDs
     } catch (error) {
       setIsLoading(false);
       setError(error.message || 'Failed to upload file');
@@ -144,3 +150,5 @@ export const useChat = () => {
   }
   return context;
 };
+
+export default ChatContext;

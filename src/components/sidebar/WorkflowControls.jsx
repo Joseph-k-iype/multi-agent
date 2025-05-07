@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { FaPlay, FaSave, FaTrash, FaShare } from 'react-icons/fa';
-import { useWorkflow } from '../../hooks/useAgentWorkflow';
+import { useWorkflowStore } from '../../stores/workflowStore';
 
 const WorkflowControls = () => {
+  // Use Zustand store
   const { 
     saveWorkflow, 
     runWorkflow, 
     clearWorkflow, 
+    exportWorkflow,
     isRunning, 
     workflowResult, 
     error 
-  } = useWorkflow();
+  } = useWorkflowStore();
   
   const [taskInput, setTaskInput] = useState('');
   const [showTaskInput, setShowTaskInput] = useState(false);
@@ -41,6 +43,14 @@ const WorkflowControls = () => {
     } catch (error) {
       console.error('Error running workflow:', error);
       alert(`Error running workflow: ${error.message}`);
+    }
+  };
+  
+  // Handle export workflow
+  const handleExport = () => {
+    const result = exportWorkflow();
+    if (!result.success) {
+      alert(`Failed to export workflow: ${result.error}`);
     }
   };
   
@@ -111,7 +121,7 @@ const WorkflowControls = () => {
       {/* Export/share button */}
       <button 
         className="workflow-action-button export-button"
-        onClick={() => alert('Export feature coming soon!')}
+        onClick={handleExport}
         disabled={isRunning}
       >
         <FaShare />

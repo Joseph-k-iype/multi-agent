@@ -1,6 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
 import ReactFlow, {
-  ReactFlowProvider,
   Background,
   Controls,
   useNodesState,
@@ -9,7 +8,7 @@ import ReactFlow, {
   Panel,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { useWorkflow } from '../../hooks/useAgentWorkflow';
+import { useWorkflowStore } from '../../stores/workflowStore';
 import AgentNode from './AgentNode';
 import CustomEdge from './CustomEdge';
 import NodeToolbar from './NodeToolbar';
@@ -28,7 +27,41 @@ const edgeTypes = {
 const AgentCanvas = ({ onNodeSelect }) => {
   const reactFlowWrapper = useRef(null);
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
-  const { nodes, setNodes, edges, setEdges, onSaveWorkflow } = useWorkflow();
+  
+  // Use Zustand store instead of context
+  const { 
+    nodes, 
+    edges, 
+    setNodes, 
+    setEdges,
+    saveWorkflow 
+  } = useWorkflowStore();
+  
+  // Use ReactFlow's state management for local manipulation
+  const [localNodes, setLocalNodes, onNodesChange] = useNodesState(nodes || []);
+  const [localEdges, setLocalEdges, onEdgesChange] = useEdgesState(edges || []);
+  
+  // Sync local state with Zustand store when nodes or edges change in store
+  React.useEffect(() => {
+    setLocalNodes(nodes || []);
+  }, [nodes, setLocalNodes]);
+  
+  React.useEffect(() => {
+    setLocalEdges(edges || []);
+  }, [edges, setLocalEdges]);
+  
+  // Sync Zustand store when local state changes
+  React.useEffect(() => {
+    if (localNodes !== nodes) {
+      setNodes(localNodes);
+    }
+  }, [localNodes, nodes, setNodes]);
+  
+  React.useEffect(() => {
+    if (localEdges !== edges) {
+      setEdges(localEdges);
+    }
+  }, [localEdges, edges, setEdges]);
   
   // Handle node select
   const onNodeClick = useCallback((_, node) => {
@@ -45,8 +78,8 @@ const AgentCanvas = ({ onNodeSelect }) => {
       style: { stroke: '#555' },
       data: { label: 'Connection' }
     };
-    setEdges((eds) => addEdge(newEdge, eds));
-  }, [setEdges]);
+    setLocalEdges((eds) => addEdge(newEdge, eds));
+  }, [setLocalEdges]);
 
   // Handle drag over for new nodes
   const onDragOver = useCallback((event) => {
@@ -59,9 +92,18 @@ const AgentCanvas = ({ onNodeSelect }) => {
     (event) => {
       event.preventDefault();
 
+      if (!reactFlowInstance) return;
+
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
       const agentType = event.dataTransfer.getData('application/agentType');
-      const agentData = JSON.parse(event.dataTransfer.getData('application/agentData'));
+      
+      let agentData;
+      try {
+        agentData = JSON.parse(event.dataTransfer.getData('application/agentData'));
+      } catch (error) {
+        console.error('Failed to parse agent data:', error);
+        return;
+      }
       
       // Get position from drop coordinates
       const position = reactFlowInstance.project({
@@ -86,17 +128,17 @@ const AgentCanvas = ({ onNodeSelect }) => {
         },
       };
 
-      setNodes((nds) => nds.concat(newNode));
+      setLocalNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance, setNodes]
+    [reactFlowInstance, setLocalNodes]
   );
 
   // Handle node deletion
   const onNodesDelete = useCallback((deleted) => {
-    setEdges(edges.filter(edge => 
+    setLocalEdges(localEdges.filter(edge => 
       !deleted.some(node => node.id === edge.source || node.id === edge.target)
     ));
-  }, [edges, setEdges]);
+  }, [localEdges, setLocalEdges]);
 
   // Handle canvas panning to prevent accidental node movement
   const onPaneClick = useCallback(() => {
@@ -105,65 +147,33 @@ const AgentCanvas = ({ onNodeSelect }) => {
 
   return (
     <div className="agent-canvas-container" ref={reactFlowWrapper}>
-      <ReactFlowProvider>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={(changes) => {
-            setNodes((nds) => {
-              const updatedNodes = [...nds];
-              changes.forEach(change => {
-                if (change.type === 'position' && change.dragging) {
-                  const index = updatedNodes.findIndex(n => n.id === change.id);
-                  if (index !== -1) {
-                    updatedNodes[index] = {
-                      ...updatedNodes[index],
-                      position: {
-                        x: change.position?.x || updatedNodes[index].position.x,
-                        y: change.position?.y || updatedNodes[index].position.y
-                      }
-                    };
-                  }
-                }
-              });
-              return updatedNodes;
-            });
-          }}
-          onEdgesChange={(changes) => {
-            // Handle edge changes
-            setEdges((eds) => {
-              return eds.map(edge => {
-                const change = changes.find(c => c.id === edge.id);
-                if (change) {
-                  return { ...edge, ...change };
-                }
-                return edge;
-              });
-            });
-          }}
-          onConnect={onConnect}
-          onInit={setReactFlowInstance}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onNodeClick={onNodeClick}
-          onNodesDelete={onNodesDelete}
-          onPaneClick={onPaneClick}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          snapToGrid={true}
-          snapGrid={[15, 15]}
-        >
-          <Background color="#aaa" gap={16} />
-          <Controls />
-          <Panel position="top-right" className="canvas-controls">
-            <NodeToolbar 
-              onSave={onSaveWorkflow}
-              hasNodes={nodes.length > 0}
-            />
-          </Panel>
-        </ReactFlow>
-      </ReactFlowProvider>
+      <ReactFlow
+        nodes={localNodes}
+        edges={localEdges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onInit={setReactFlowInstance}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onNodeClick={onNodeClick}
+        onNodesDelete={onNodesDelete}
+        onPaneClick={onPaneClick}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        snapToGrid={true}
+        snapGrid={[15, 15]}
+      >
+        <Background color="#aaa" gap={16} />
+        <Controls />
+        <Panel position="top-right" className="canvas-controls">
+          <NodeToolbar 
+            onSave={saveWorkflow}
+            hasNodes={localNodes.length > 0}
+          />
+        </Panel>
+      </ReactFlow>
     </div>
   );
 };

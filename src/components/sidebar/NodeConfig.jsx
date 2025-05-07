@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useWorkflow } from '../../hooks/useAgentWorkflow';
+import { useWorkflowStore } from '../../stores/workflowStore';
 import { availableTools, getToolById } from '../../utils/agentTemplates';
 
 const NodeConfig = ({ node }) => {
-  const { setNodes } = useWorkflow();
+  // Use Zustand store
+  const { updateNode } = useWorkflowStore();
+  
   const [formData, setFormData] = useState({
     label: '',
     role: '',
@@ -77,25 +79,14 @@ const NodeConfig = ({ node }) => {
     e.preventDefault();
     if (!node) return;
 
-    setNodes(nds => 
-      nds.map(n => {
-        if (n.id === node.id) {
-          // Update node with new data
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              label: formData.label,
-              role: formData.role,
-              goal: formData.goal,
-              allowedTools: formData.allowedTools,
-              config: formData.config
-            }
-          };
-        }
-        return n;
-      })
-    );
+    // Use the updateNode action from Zustand
+    updateNode(node.id, {
+      label: formData.label,
+      role: formData.role,
+      goal: formData.goal,
+      allowedTools: formData.allowedTools,
+      config: formData.config
+    });
   };
 
   // If no node is selected, don't render the form

@@ -1,21 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useWorkflow } from '../../hooks/useAgentWorkflow';
-import { useChat } from '../../contexts/ChatContext';
+import { useWorkflowStore } from '../../stores/workflowStore';
+import { useChatStore } from '../../stores/chatStore';
+import { useFileStore } from '../../stores/fileStore';
 import ChatMessage from './ChatMessage';
 import FileUpload from '../common/FileUpload';
 
 const ChatInterface = () => {
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef(null);
-  const { runWorkflow, isRunning, workflowResult } = useWorkflow();
+  
+  // Use Zustand stores
+  const { runWorkflow, isRunning, workflowResult } = useWorkflowStore();
   const { 
     messages, 
     addMessage, 
     addSystemMessage,
     isLoading,
     uploadFile,
-    uploadedFiles
-  } = useChat();
+    sendMessage
+  } = useChatStore();
+  
+  const { 
+    files: uploadedFiles,
+    fetchFiles,
+    uploadFiles
+  } = useFileStore();
+  
+  // Load files on component mount
+  useEffect(() => {
+    fetchFiles().catch(err => {
+      console.error('Error fetching files:', err);
+    });
+  }, [fetchFiles]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -25,7 +41,7 @@ const ChatInterface = () => {
   // Run the workflow when user sends a message
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || isLoading) return;
+    if (!inputMessage.trim() || isLoading || isRunning) return;
 
     // Add user message to chat
     addMessage('user', inputMessage);
@@ -35,15 +51,20 @@ const ChatInterface = () => {
     addSystemMessage('typing', null);
 
     try {
-      // Run the workflow with the user's message as the initial task
+      // First attempt direct chat with the LLM
+      if (uploadedFiles.length > 0) {
+        // If files are uploaded, use RAG approach
+        const response = await sendMessage(inputMessage);
+        if (response.success) {
+          return; // Message handled by chat service
+        }
+      }
+      
+      // If no direct chat or it failed, run the workflow
       const result = await runWorkflow(inputMessage);
 
-      // Remove typing indicator
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.type === 'typing') {
-        // Replace last message (typing indicator) with system message
-        addSystemMessage('system', 'Workflow completed!');
-      }
+      // Remove typing indicator and add system message
+      addSystemMessage('system', 'Workflow completed!');
 
       if (result.success) {
         // Extract the final content from the workflow result
@@ -62,7 +83,7 @@ const ChatInterface = () => {
       }
     } catch (error) {
       // Handle error
-      addSystemMessage('error', error.message || 'An error occurred while running the workflow.');
+      addSystemMessage('error', error.message || 'An error occurred while processing your request.');
     }
   };
 
@@ -70,11 +91,15 @@ const ChatInterface = () => {
   const handleFileUpload = async (files) => {
     try {
       addSystemMessage('system', 'Uploading file(s)...');
-      const uploadedFileIds = await uploadFile(files);
+      
+      // Upload files
+      const response = await uploadFiles(files);
+      
+      // Update file list
+      await fetchFiles();
+      
       addSystemMessage('system', `File(s) uploaded successfully! Added to RAG database.`);
       
-      // Here you could trigger a refresh of the vector store or update UI
-      // to show that the files are now available for RAG
     } catch (error) {
       addSystemMessage('error', `File upload failed: ${error.message}`);
     }
@@ -96,13 +121,18 @@ const ChatInterface = () => {
         
         {uploadedFiles.length > 0 && (
           <div className="uploaded-files">
-            <h4>Uploaded Files</h4>
+            <h4>Uploaded Files ({uploadedFiles.length})</h4>
             <ul>
-              {uploadedFiles.map((file, index) => (
-                <li key={index}>
-                  {file.name} ({(file.size / 1024).toFixed(2)} KB)
+              {uploadedFiles.slice(0, 5).map((file, index) => (
+                <li key={file.id || index}>
+                  {file.original_name || file.name} ({((file.size || 0) / 1024).toFixed(2)} KB)
                 </li>
               ))}
+              {uploadedFiles.length > 5 && (
+                <li className="more-files">
+                  +{uploadedFiles.length - 5} more files
+                </li>
+              )}
             </ul>
           </div>
         )}

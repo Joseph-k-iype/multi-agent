@@ -12,17 +12,19 @@ import sys
 import uuid
 import json
 import logging
-import tempfile
-import shutil
+import chardet
+import pandas as pd
+import numpy as np
 from typing import Optional, Any, Dict, List, Union, TypedDict, Annotated, Callable, Literal, Set
 from pathlib import Path
 import operator
 import importlib
 from datetime import datetime
+from collections import namedtuple
 
 # --- Core Dependencies ---
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Depends
@@ -41,6 +43,8 @@ from langchain_core.tools import tool as lc_tool, BaseTool
 from langchain_community.vectorstores import Chroma
 from langchain.tools.retriever import create_retriever_tool
 from langchain.tools import Tool
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationChain, LLMChain
 from langchain.document_loaders import (
     TextLoader,
     CSVLoader, 
@@ -77,6 +81,7 @@ ORCHESTRATOR_CONFIG_PATH = CONFIG_DIR / "orchestrator.json"
 TOOLS_CONFIG_PATH = CONFIG_DIR / "tools.json"
 CONFIG_PATH = ENV_DIR / "config.env"
 CREDS_PATH = ENV_DIR / "credentials.env"
+CERT_PATH = ENV_DIR / "cacert.pem"
 
 # Add custom tools directory to Python path
 if CUSTOM_TOOLS_DIR.is_dir():
@@ -86,6 +91,25 @@ else:
     logger.warning(f"Custom tools directory not found: {CUSTOM_TOOLS_DIR.resolve()}. Custom function tools may fail to load.")
 
 # --- Utility Functions ---
+Triple = namedtuple("Triple", ["subject", "predicate", "object"])
+
+def is_file_readable(filepath: str) -> bool:
+    """Check if a file is readable."""
+    if not os.path.isfile(filepath) or not os.access(filepath, os.R_OK):
+        raise FileNotFoundError(f"The file '{filepath}' does not exist or is not readable")
+    return True
+
+def str_to_bool(s: str) -> bool:
+    """Convert a string to a boolean."""
+    if isinstance(s, bool):
+        return s
+    if isinstance(s, str):
+        if s.lower() in ('true', '1', 't', 'y', 'yes'):
+            return True
+        elif s.lower() in ('false', '0', 'f', 'n', 'no'):
+            return False
+    raise ValueError(f"Invalid boolean value: {s}")
+
 def load_json_config(path: Path, schema: Optional[type[BaseModel]] = None) -> Union[Dict, List, None]:
     """Loads JSON config, optionally validates against a Pydantic schema."""
     if not path.is_file():
@@ -111,198 +135,262 @@ def load_json_config(path: Path, schema: Optional[type[BaseModel]] = None) -> Un
         logger.error(f"Error loading config file {path}: {e}")
         return None
 
-def str_to_bool(s: Optional[str]) -> bool:
-    """Convert a string representation of truth to boolean."""
-    return s is not None and s.lower() in ('true', '1', 't', 'y', 'yes')
-
-# --- Environment Management ---
-class ConfigManager:
-    """Loads environment variables needed for the application."""
-    def __init__(self, config_path: Path = CONFIG_PATH, creds_path: Optional[Path] = CREDS_PATH):
-        self._vars = {}
-        self._sensitive_keys = {'AZURE_OPENAI_API_KEY', 'AZURE_CLIENT_SECRET', 'TAVILY_API_KEY', 'SERPAPI_API_KEY', 'PROXY_PASSWORD'}
-
-        # Load main .env file first
-        if config_path.is_file():
-             logger.info(f"Loading environment variables from: {config_path}")
-             self._vars.update(dotenv_values(config_path))
-        else:
-             logger.warning(f"Main config file not found: {config_path}. Relying on system environment variables.")
-
-        # Optionally load credentials file
-        if creds_path and creds_path.is_file():
-             logger.info(f"Loading credentials from: {creds_path}")
-             # Don't print values from credentials file
-             creds_dict = dotenv_values(creds_path)
-             if creds_dict:
-                  self._vars.update(creds_dict)
-        elif creds_path:
-             logger.warning(f"Credentials file path specified but not found: {creds_path}")
-
-        # Load system environment variables (override .env files)
-        self._vars.update(os.environ)
-
-        # Set proxy if configured
+# --- Environment Management (Using OSEnv from sample) ---
+class OSEnv:
+    def __init__(self, config_file: str, creds_file: str, certificate_path: str):
+        self.var_list = []
+        self.bulk_set(config_file, True)
+        self.bulk_set(creds_file, False)
+        self.set_certificate_path(certificate_path)
         if str_to_bool(self.get("PROXY_ENABLED", "False")):
             self.set_proxy()
-
-        # Set certificate path if configured
-        # Look for cert in env vars first, then default path
-        cert_env_var = self.get("REQUESTS_CA_BUNDLE") or self.get("SSL_CERT_FILE")
-        default_cert_path = ENV_DIR / "cacert.pem"
-        cert_file_path = cert_env_var or (default_cert_path if default_cert_path.is_file() else None)
-
-        if cert_file_path and Path(cert_file_path).is_file():
-             cert_file = str(Path(cert_file_path).resolve())
-             logger.info(f"Using certificate bundle: {cert_file}")
-             os.environ['REQUESTS_CA_BUNDLE'] = cert_file # Set for libraries like requests
-             os.environ['SSL_CERT_FILE'] = cert_file # Set for ssl module
-        elif cert_env_var: # If env var was set but file not found
-             logger.warning(f"Certificate path specified in env var '{cert_env_var}' but file not found.")
-
-    def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
-        """Gets a configuration value."""
-        return self._vars.get(key, default)
-
-    def set_proxy(self):
-        """Sets proxy settings based on loaded environment variables."""
-        proxy_url = self.get("HTTPS_PROXY") or self.get("HTTP_PROXY")
-        if not proxy_url:
-             user = self.get("PROXY_USER")
-             # Get password securely, preferring credentials file
-             pwd = self.get("PROXY_PASSWORD")
-             domain = self.get("PROXY_DOMAIN")
-             if domain:
-                  auth = f"{user}:{pwd}@" if user and pwd else ""
-                  # Assume http unless http:// specified in domain
-                  scheme = "http://" if domain.startswith("http://") else "http://"
-                  # Remove scheme from domain if present before adding auth
-                  domain_no_scheme = domain.split("://")[-1]
-                  proxy_url = f"{scheme}{auth}{domain_no_scheme}"
-                  logger.info(f"Constructed proxy URL: {scheme}{'***:***@' if user and pwd else ''}{domain_no_scheme}")
-             else:
-                  logger.warning("Proxy enabled but no proxy URL (HTTPS_PROXY/HTTP_PROXY) or domain (PROXY_DOMAIN) found.")
-                  return
-
-        os.environ['HTTP_PROXY'] = proxy_url
-        os.environ['HTTPS_PROXY'] = proxy_url
-        logger.info(f"HTTP/HTTPS Proxy set via environment variables.")
-
-        no_proxy = self.get("NO_PROXY", "")
-        # Add standard Azure domains if not already present
-        azure_domains = '.openai.azure.com,.cognitiveservices.azure.com,.azure.com,.core.windows.net'
-        # Ensure domains are comma-separated and handle existing values
-        existing_no_proxy = [d.strip() for d in no_proxy.split(',') if d.strip()]
-        needed_domains = [d for d in azure_domains.split(',') if d not in existing_no_proxy]
-        if needed_domains:
-            no_proxy = ",".join(existing_no_proxy + needed_domains)
-
-        os.environ['NO_PROXY'] = no_proxy
-        logger.info(f"NO_PROXY set to: {no_proxy}")
-
-    def get_azure_credential(self):
-        """Gets Azure credential object based on config."""
+        
+        self.credential = self._get_credential()
+        
+        if str_to_bool(self.get("SECURED_ENDPOINTS", "False")):
+            self.token = self.get_azure_token()
+        else:
+            self.token = None
+        
+    def _get_credential(self):
+        if str_to_bool(self.get("USE_MANAGED_IDENTITY", "False")):
+            return DefaultAzureCredential()
+        else:
+            return ClientSecretCredential(
+                tenant_id=self.get("AZURE_TENANT_ID"), 
+                client_id=self.get("AZURE_CLIENT_ID"), 
+                client_secret=self.get("AZURE_CLIENT_SECRET")
+            )
+    
+    def set_certificate_path(self, path: str):
         try:
-            if str_to_bool(self.get("USE_MANAGED_IDENTITY", "False")):
-                logger.info("Using Azure Managed Identity (DefaultAzureCredential).")
-                # May need exclude_shared_token_cache_credential=True depending on env
-                return DefaultAzureCredential()
+            if not os.path.isabs(path):
+                path = os.path.abspath(path)
+            if os.path.exists(path) and is_file_readable(path):
+                self.set("REQUESTS_CA_BUNDLE", path)
+                self.set("SSL_CERT_FILE", path)
+                self.set("CURL_CA_BUNDLE", path)
             else:
-                logger.info("Attempting Azure Client Secret Credential.")
-                tenant_id = self.get("AZURE_TENANT_ID")
-                client_id = self.get("AZURE_CLIENT_ID")
-                client_secret = self.get("AZURE_CLIENT_SECRET")
-                if all([tenant_id, client_id, client_secret]):
-                    logger.info("Found Tenant/Client ID/Secret, using ClientSecretCredential.")
-                    return ClientSecretCredential(tenant_id=tenant_id, client_id=client_id, client_secret=client_secret)
-                else:
-                    logger.info("Client Secret credentials not fully provided.")
-                    return None # Fallback handled below
+                logger.warning(f"Certificate file not found: {path}. Proceeding without certificate.")
         except Exception as e:
-            logger.error(f"Error creating Azure credential object: {e}", exc_info=True)
+            logger.error(f"Error setting certificate path: {e}")
+    
+    def bulk_set(self, dotenvfile: str, print_val: bool = False) -> None:
+        try:
+            if not os.path.isabs(dotenvfile):
+                dotenvfile = os.path.abspath(dotenvfile)
+            if os.path.exists(dotenvfile):
+                temp_dict = dotenv_values(dotenvfile)
+                for key, value in temp_dict.items():
+                    self.set(key, value, print_val)
+                del temp_dict
+            else:
+                logger.warning(f"Environment file not found: {dotenvfile}. Proceeding without it.")
+        except Exception as e:
+            logger.error(f"Error loading environment variables from {dotenvfile}: {e}")
+    
+    def set(self, key: str, value: str, print_val: bool = False) -> None:
+        try:
+            os.environ[key] = value
+            if key not in self.var_list:
+                self.var_list.append(key)
+            if print_val:
+                logger.info(f"{key}: {value}")
+        except Exception as e:
+            logger.error(f"Error setting environment variable {key}: {e}")
+    
+    def get(self, key: str, default: Optional[str] = None) -> str:
+        try:
+            return os.environ.get(key, default)
+        except Exception as e:
+            logger.error(f"Error getting environment variable {key}: {e}")
+            return default
+    
+    def set_proxy(self) -> None:
+        try:
+            # Try with the new format first
+            proxy_url = self.get("HTTPS_PROXY")
+            if not proxy_url:
+                # Try the format in the provided code
+                ad_username = self.get("AD_USERNAME")
+                ad_password = self.get("AD_USER_PW")
+                proxy_domain = self.get("HTTPS_PROXY_DOMAIN")
+                if all([ad_username, ad_password, proxy_domain]):
+                    proxy_url = f"https://{ad_username}:{ad_password}@{proxy_domain}"
+                else:
+                    # Try alternative format
+                    proxy_user = self.get("PROXY_USER")
+                    proxy_password = self.get("PROXY_PASSWORD")
+                    proxy_domain = self.get("PROXY_DOMAIN")
+                    if all([proxy_user, proxy_password, proxy_domain]):
+                        proxy_url = f"https://{proxy_user}:{proxy_password}@{proxy_domain}"
+            
+            if proxy_url:
+                self.set("HTTP_PROXY", proxy_url, print_val=False)
+                self.set("HTTPS_PROXY", proxy_url, print_val=False)
+                
+                # Set NO_PROXY for Azure domains
+                no_proxy_domains = [
+                    'cognitiveservices.azure.com',
+                    'search.windows.net',
+                    'openai.azure.com',
+                    'core.windows.net',
+                    'azurewebsites.net'
+                ]
+                self.set("NO_PROXY", ",".join(no_proxy_domains), print_val=False)
+                logger.info("Proxy settings configured successfully")
+            else:
+                logger.warning("Proxy enabled but no proxy configuration found")
+        except Exception as e:
+            logger.error(f"Error setting proxy: {e}")
+    
+    def get_azure_token(self) -> str:
+        try:
+            token_provider = get_bearer_token_provider(
+                self.credential,
+                "https://cognitiveservices.azure.com/.default"
+            )
+            token = token_provider()
+            self.set("AZURE_TOKEN", token, print_val=False)
+            logger.info("Azure token set")
+            return token
+        except Exception as e:
+            logger.error(f"Error retrieving Azure token: {e}")
             return None
+    
+    def list_env_vars(self) -> None:
+        for var in self.var_list:
+            if var in {'AZURE_TOKEN', 'AD_USER_PW', 'AZURE_CLIENT_SECRET', 'PROXY_PASSWORD'}:
+                logger.info(f"{var}: [REDACTED]")
+            else:
+                logger.info(f"{var}: {os.getenv(var)}")
 
-# --- LLM Service (Azure Focused) ---
+# --- Document and Embedding Classes ---
+class MyDocument(BaseModel):
+    id: str = ""
+    text: str = ""
+    embedding: List[float] = []
+    metadata: Dict[str, Any] = {}
+
+class EmbeddingClient:
+    def __init__(self, env: OSEnv, azure_api_version: str = None, embeddings_model: str = None):
+        self.env = env
+        self.azure_api_version = azure_api_version or self.env.get("AZURE_OPENAI_API_VERSION", "2023-05-15")
+        self.embeddings_model = embeddings_model or self.env.get("AZURE_OPENAI_EMBEDDING_MODEL_NAME", "text-embedding-3-large")
+        self.azure_endpoint = self.env.get("AZURE_OPENAI_ENDPOINT")
+        self.direct_azure_client = self._get_direct_azure_client()
+        
+    def _get_direct_azure_client(self):
+        try:
+            token_provider = get_bearer_token_provider(
+                self.env.credential,
+                "https://cognitiveservices.azure.com/.default"
+            )
+            return AzureOpenAI(
+                azure_endpoint=self.azure_endpoint,
+                api_version=self.azure_api_version,
+                azure_ad_token_provider=token_provider
+            )
+        except Exception as e:
+            logger.error(f"Error creating Azure OpenAI client: {e}")
+            # Fall back to API key if available
+            api_key = self.env.get("AZURE_OPENAI_API_KEY")
+            if api_key:
+                logger.info("Falling back to API key authentication for Azure OpenAI")
+                return AzureOpenAI(
+                    api_key=api_key,
+                    azure_endpoint=self.azure_endpoint,
+                    api_version=self.azure_api_version
+                )
+            raise
+    
+    def generate_embeddings(self, doc: MyDocument) -> MyDocument:
+        try:
+            # Generate embedding for the document
+            response = self.direct_azure_client.embeddings.create(
+                model=self.embeddings_model,
+                input=doc.text
+            ).data[0].embedding
+            doc.embedding = response
+            return doc
+        except Exception as e:
+            logger.error(f"Error generating embeddings: {e}")
+            return doc
+    
+    def generate_embeddings_batch(self, docs: List[MyDocument]) -> List[MyDocument]:
+        try:
+            # Extract text from each document
+            texts = [doc.text for doc in docs]
+            
+            # Generate embeddings in a batch
+            response = self.direct_azure_client.embeddings.create(
+                model=self.embeddings_model,
+                input=texts
+            )
+            
+            # Update each document with its embedding
+            for i, embedding_data in enumerate(response.data):
+                docs[i].embedding = embedding_data.embedding
+            
+            return docs
+        except Exception as e:
+            logger.error(f"Error generating batch embeddings: {e}")
+            return docs
+    
+    def get_langchain_embeddings(self):
+        """Returns a LangChain embeddings object that uses this client."""
+        from langchain_core.embeddings import Embeddings  # Import correctly at the top level
+        
+        class CustomEmbeddings(Embeddings):
+            def __init__(self, client: EmbeddingClient):
+                self.client = client
+            
+            def embed_documents(self, texts: List[str]) -> List[List[float]]:
+                docs = [MyDocument(text=text) for text in texts]
+                embedded_docs = self.client.generate_embeddings_batch(docs)
+                return [doc.embedding for doc in embedded_docs]
+            
+            def embed_query(self, text: str) -> List[float]:
+                doc = MyDocument(text=text)
+                embedded_doc = self.client.generate_embeddings(doc)
+                return embedded_doc.embedding
+        
+        return CustomEmbeddings(self)
+
+# --- AzureLLMService (enhanced with OSEnv) ---
 class AzureLLMService:
     """Provides initialized Azure OpenAI LLM and Embedding clients."""
-    def __init__(self, config: ConfigManager):
-        self.config = config
+    def __init__(self, env: OSEnv):
+        self.env = env
+        self.embedding_client = EmbeddingClient(self.env)
         self.llm_client = self._setup_llm_client()
-        self.embedding_client = self._setup_embedding_client()
+        self.langchain_embeddings = self.embedding_client.get_langchain_embeddings()
 
         if not self.llm_client:
             raise RuntimeError("Failed to initialize Azure OpenAI LLM client.")
-        if not self.embedding_client:
-            # Allow running without embeddings if no tools need them
-            logger.warning("Failed to initialize Azure OpenAI Embedding client. Vector DB tools may not work.")
-
-    def _get_http_client(self) -> Optional[DefaultHttpxClient]:
-         """Creates an HTTPX client respecting proxy and cert settings."""
-         proxy = self.config.get("HTTPS_PROXY") # Use HTTPS_PROXY for both
-         cert = os.environ.get("REQUESTS_CA_BUNDLE") # Use env var directly as it's set by ConfigManager
-         proxies = {"http://": proxy, "http://": proxy} if proxy else None
-
-         if proxies or cert:
-              logger.info(f"Creating HTTPX client with proxy: {'Yes' if proxies else 'No'}, cert: {'Yes' if cert else 'No'}")
-              # httpx uses 'verify' for cert path or boolean
-              return DefaultHttpxClient(proxies=proxies, verify=cert if cert else True)
-         return None # Use default client if no proxy/cert needed
 
     def _setup_llm_client(self):
         """Initializes the AzureChatOpenAI client."""
         try:
-            deployment_name = self.config.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
-            model_name = self.config.get("AZURE_OPENAI_CHAT_MODEL_NAME", deployment_name) # Fallback model name
-            api_version = self.config.get("AZURE_OPENAI_API_VERSION", "2024-02-01") # Use a recent stable version
-            azure_endpoint = self.config.get("AZURE_OPENAI_ENDPOINT")
-            api_key = self.config.get("AZURE_OPENAI_API_KEY")
-            azure_ad_token_provider = None
-
-            if not azure_endpoint:
-                logger.critical("AZURE_OPENAI_ENDPOINT environment variable is not set.")
-                return None
-            if not deployment_name:
-                 logger.critical("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME environment variable is not set.")
-                 return None
-
-            credential = self.config.get_azure_credential()
-            http_client = self._get_http_client()
-
-            if credential:
-                logger.info("Using Azure AD Token Provider for LLM.")
-                try:
-                    # Define the scope required by Azure OpenAI
-                    scope = "https://cognitiveservices.azure.com/.default"
-                    azure_ad_token_provider = get_bearer_token_provider(
-                        credential, scope
-                    )
-                    api_key = None # Explicitly nullify API key if using token provider
-                except Exception as e:
-                    logger.error(f"Failed to get token provider: {e}. Check Azure credentials/permissions for scope '{scope}'.")
-                    azure_ad_token_provider = None # Ensure it's None if provider fails
-                    if not api_key: # Only fail if API key is also missing
-                         logger.critical("Azure AD credential failed and no API Key provided.")
-                         return None
-                    else:
-                         logger.warning("Azure AD failed, falling back to API Key for LLM.")
-
-            elif not api_key:
-                logger.critical("Neither Azure AD credentials nor AZURE_OPENAI_API_KEY are configured for LLM.")
-                return None
-            else:
-                 logger.info("Using API Key for LLM.")
-
+            deployment_name = self.env.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
+            model_name = self.env.get("AZURE_OPENAI_CHAT_MODEL_NAME", deployment_name)
+            api_version = self.env.get("AZURE_OPENAI_API_VERSION", "2023-05-15")
+            azure_endpoint = self.env.get("AZURE_OPENAI_ENDPOINT")
+            
+            # Get token provider from env credential
+            token_provider = get_bearer_token_provider(
+                self.env.credential,
+                "https://cognitiveservices.azure.com/.default"
+            )
+            
             llm = AzureChatOpenAI(
                 azure_deployment=deployment_name,
                 model=model_name,
                 openai_api_version=api_version,
                 azure_endpoint=azure_endpoint,
-                api_key=api_key, # Will be None if using token provider
-                azure_ad_token_provider=azure_ad_token_provider, # Will be None if using API key or AD failed
-                http_client=http_client,
-                # Default temperature/max_tokens can be set here or overridden by agent config
-                temperature=float(self.config.get("DEFAULT_LLM_TEMPERATURE", 0.7)),
-                max_tokens=int(self.config.get("DEFAULT_LLM_MAX_TOKENS", 1000))
+                azure_ad_token_provider=token_provider,
+                temperature=float(self.env.get("DEFAULT_LLM_TEMPERATURE", 0.7)),
+                max_tokens=int(self.env.get("DEFAULT_LLM_MAX_TOKENS", 1000))
             )
             logger.info(f"AzureChatOpenAI client created for deployment '{deployment_name}'.")
             return llm
@@ -312,65 +400,23 @@ class AzureLLMService:
              return None
         except Exception as e:
             logger.critical(f"Critical error setting up Azure LLM client: {e}", exc_info=True)
-            return None
-
-    def _setup_embedding_client(self):
-        """Initializes the AzureOpenAIEmbeddings client."""
-        try:
-            deployment_name = self.config.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
-            model_name = self.config.get("AZURE_OPENAI_EMBEDDING_MODEL_NAME", deployment_name)
-            api_version = self.config.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-            azure_endpoint = self.config.get("AZURE_OPENAI_ENDPOINT")
-            api_key = self.config.get("AZURE_OPENAI_API_KEY")
-            azure_ad_token_provider = None
-
-            if not azure_endpoint or not deployment_name:
-                logger.warning("Embedding endpoint or deployment name missing. Embeddings disabled.")
-                return None
-
-            credential = self.config.get_azure_credential()
-            http_client = self._get_http_client()
-
-            if credential:
-                logger.info("Using Azure AD Token Provider for Embeddings.")
-                try:
-                    scope = "https://cognitiveservices.azure.com/.default"
-                    azure_ad_token_provider = get_bearer_token_provider(
-                        credential, scope
+            # Fall back to API key if available
+            try:
+                api_key = self.env.get("AZURE_OPENAI_API_KEY")
+                if api_key:
+                    logger.info("Falling back to API key authentication for Azure Chat LLM")
+                    llm = AzureChatOpenAI(
+                        azure_deployment=deployment_name,
+                        model=model_name,
+                        openai_api_version=api_version,
+                        azure_endpoint=azure_endpoint,
+                        api_key=api_key,
+                        temperature=float(self.env.get("DEFAULT_LLM_TEMPERATURE", 0.7)),
+                        max_tokens=int(self.env.get("DEFAULT_LLM_MAX_TOKENS", 1000))
                     )
-                    api_key = None
-                except Exception as e:
-                    logger.error(f"Failed to get token provider for embeddings: {e}. Check Azure credentials/permissions for scope '{scope}'.")
-                    azure_ad_token_provider = None
-                    if not api_key:
-                         logger.warning("Azure AD failed and no API Key provided for Embeddings.")
-                         return None
-                    else:
-                         logger.warning("Azure AD failed, falling back to API Key for Embeddings.")
-
-            elif not api_key:
-                logger.warning("Neither Azure AD credentials nor API Key configured for Embeddings.")
-                return None
-            else:
-                 logger.info("Using API Key for Embeddings.")
-
-            embeddings = AzureOpenAIEmbeddings(
-                azure_deployment=deployment_name,
-                model=model_name,
-                openai_api_version=api_version,
-                azure_endpoint=azure_endpoint,
-                api_key=api_key,
-                azure_ad_token_provider=azure_ad_token_provider,
-                http_client=http_client,
-            )
-            logger.info(f"AzureOpenAIEmbeddings client created for deployment '{deployment_name}'.")
-            return embeddings
-
-        except ImportError:
-             logger.warning("Import error: Ensure `langchain-openai` is installed. Embeddings disabled.")
-             return None
-        except Exception as e:
-            logger.warning(f"Error setting up Azure Embedding client: {e}. Embeddings disabled.", exc_info=True)
+                    return llm
+            except Exception as fallback_error:
+                logger.critical(f"Fallback authentication also failed: {fallback_error}")
             return None
 
 # --- File Upload and RAG Integration Classes ---
@@ -500,10 +546,10 @@ class RAGManager:
     
     def __init__(self, 
                  chroma_dir: Path, 
-                 embedding_function, 
+                 embedding_client: EmbeddingClient, 
                  file_manager: FileManager):
         self.chroma_dir = chroma_dir
-        self.embedding_function = embedding_function
+        self.embedding_client = embedding_client
         self.file_manager = file_manager
         self.collections = set()
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -540,16 +586,19 @@ class RAGManager:
         """Get an existing collection or create a new one."""
         try:
             if collection_name not in self.collections:
+                # Create embedding function for ChromaDB
+                embedding_function = self.embedding_client.get_langchain_embeddings()
+                
                 collection = self.chroma_client.create_collection(
                     name=collection_name,
-                    embedding_function=self.embedding_function
+                    embedding_function=embedding_function
                 )
                 self.collections.add(collection_name)
                 logger.info(f"Created new collection: {collection_name}")
             else:
                 collection = self.chroma_client.get_collection(
                     name=collection_name,
-                    embedding_function=self.embedding_function
+                    embedding_function=self.embedding_client.get_langchain_embeddings()
                 )
                 logger.info(f"Using existing collection: {collection_name}")
             
@@ -583,7 +632,7 @@ class RAGManager:
         langchain_chroma = Chroma(
             client=self.chroma_client,
             collection_name=collection_name,
-            embedding_function=self.embedding_function
+            embedding_function=self.embedding_client.get_langchain_embeddings()
         )
         
         # Create retriever
@@ -630,35 +679,40 @@ class RAGManager:
             # Create unique document IDs based on file ID and chunk index
             doc_ids = [f"{file_id}_chunk_{i}" for i in range(len(splits))]
             
+            # Convert to MyDocument format
+            my_docs = []
+            for i, doc in enumerate(splits):
+                my_doc = MyDocument(
+                    id=doc_ids[i],
+                    text=doc.page_content,
+                    metadata={
+                        "source": file_info["original_name"],
+                        "file_id": file_id,
+                        "chunk_size": len(doc.page_content),
+                        # Add page number if available
+                        **({"page": doc.metadata["page"]} if "page" in doc.metadata else {})
+                    }
+                )
+                my_docs.append(my_doc)
+            
+            # Generate embeddings
+            embedded_docs = self.embedding_client.generate_embeddings_batch(my_docs)
+            
             # Create embeddings and add to collection
             collection = self.get_or_create_collection(collection_name)
             
-            # Prepare metadatas for ChromaDB
-            metadatas = []
-            texts = []
-            
-            for doc in splits:
-                doc_metadata = {
-                    "source": file_info["original_name"],
-                    "file_id": file_id,
-                    "chunk_size": len(doc.page_content),
-                    # Add page number if available
-                    **({"page": doc.metadata["page"]} if "page" in doc.metadata else {})
-                }
-                metadatas.append(doc_metadata)
-                texts.append(doc.page_content)
+            # Prepare data for ChromaDB
+            ids = [doc.id for doc in embedded_docs]
+            texts = [doc.text for doc in embedded_docs]
+            embeddings = [doc.embedding for doc in embedded_docs]
+            metadatas = [doc.metadata for doc in embedded_docs]
             
             # Add to the collection
-            langchain_chroma = Chroma(
-                client=self.chroma_client,
-                collection_name=collection_name,
-                embedding_function=self.embedding_function
-            )
-            
-            langchain_chroma.add_texts(
-                texts=texts,
-                metadatas=metadatas,
-                ids=doc_ids
+            collection.add(
+                ids=ids,
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas
             )
             
             # Update file metadata
@@ -684,8 +738,8 @@ class RAGManager:
 # --- Tool Registry ---
 class ToolRegistry:
     """Loads tool configurations and provides access to initialized tools."""
-    def __init__(self, config_path: Path, llm_service: AzureLLMService, config_manager: ConfigManager, rag_manager: Optional[RAGManager] = None):
-        self.config_manager = config_manager
+    def __init__(self, config_path: Path, llm_service: AzureLLMService, env: OSEnv, rag_manager: Optional[RAGManager] = None):
+        self.env = env
         self.llm_service = llm_service
         self.rag_manager = rag_manager
         self.tools_config = load_json_config(config_path) # Load default tools config
@@ -1026,7 +1080,6 @@ class AgentNode:
             logger.warning(f"No specific output mapping logic defined for agent: {agent_id}. Storing in '{agent_id}_output'.")
             return {f"{agent_id}_output": output}
 
-
 # --- Workflow Graph Builder ---
 class WorkflowGraph:
     """Builds and runs the LangGraph workflow based on configurations."""
@@ -1340,7 +1393,7 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 # --- Global instances (initialized on startup) ---
 # These shared components are initialized once for efficiency
-config_manager_global: Optional[ConfigManager] = None
+env_global: Optional[OSEnv] = None
 llm_service_global: Optional[AzureLLMService] = None
 tool_registry_global: Optional[ToolRegistry] = None
 file_manager_global: Optional[FileManager] = None
@@ -1349,7 +1402,7 @@ rag_manager_global: Optional[RAGManager] = None
 @app.on_event("startup")
 def startup_event():
     """Initialize global components needed by all requests."""
-    global config_manager_global, llm_service_global, tool_registry_global, file_manager_global, rag_manager_global
+    global env_global, llm_service_global, tool_registry_global, file_manager_global, rag_manager_global
     logger.info("FastAPI application startup: Initializing shared components...")
     try:
         # Ensure config directories exist
@@ -1359,21 +1412,22 @@ def startup_event():
         UPLOADS_DIR.mkdir(exist_ok=True)
         CHROMADB_DIR.mkdir(exist_ok=True)
 
-        # Initialize config manager
-        config_manager_global = ConfigManager()
+        # Initialize environment with OSEnv (as provided in your code)
+        env_global = OSEnv(str(CONFIG_PATH), str(CREDS_PATH), str(CERT_PATH))
         
         # Initialize LLM service
-        llm_service_global = AzureLLMService(config=config_manager_global)
+        llm_service_global = AzureLLMService(env=env_global)
         
         # Initialize file manager (without ChromaDB initially)
         file_manager_global = FileManager(upload_dir=UPLOADS_DIR)
         
         # Initialize RAG manager if embeddings are available
-        if llm_service_global.embedding_client:
+        embedding_client = llm_service_global.embedding_client
+        if embedding_client:
             logger.info("Initializing RAG manager with ChromaDB...")
             rag_manager_global = RAGManager(
                 chroma_dir=CHROMADB_DIR,
-                embedding_function=llm_service_global.embedding_client,
+                embedding_client=embedding_client,
                 file_manager=file_manager_global
             )
             
@@ -1386,7 +1440,7 @@ def startup_event():
         tool_registry_global = ToolRegistry(
             config_path=TOOLS_CONFIG_PATH,
             llm_service=llm_service_global,
-            config_manager=config_manager_global,
+            env=env_global,
             rag_manager=rag_manager_global
         )
         
@@ -1395,7 +1449,7 @@ def startup_event():
         logger.critical(f"FATAL: Failed to initialize shared components on startup: {e}", exc_info=True)
         # Prevent app from starting properly if core components fail
         # FastAPI might still start but endpoints relying on these will fail
-        config_manager_global = None
+        env_global = None
         llm_service_global = None
         tool_registry_global = None
         file_manager_global = None
@@ -1407,7 +1461,7 @@ def startup_event():
 def get_service_dependencies() -> Dict[str, bool]:
     """Get the status of service dependencies as a dict."""
     return {
-        "config_manager": config_manager_global is not None,
+        "env": env_global is not None,
         "llm_service": llm_service_global is not None,
         "tool_registry": tool_registry_global is not None,
         "file_manager": file_manager_global is not None,
@@ -1703,7 +1757,7 @@ async def websocket_chat(websocket: WebSocket):
 async def health_check(dependencies: Dict[str, bool] = Depends(get_service_dependencies)):
     """Basic health check endpoint."""
     services_status = "ok" if all([
-        dependencies["config_manager"],
+        dependencies["env"],
         dependencies["llm_service"],
         dependencies["tool_registry"]
     ]) else "error"

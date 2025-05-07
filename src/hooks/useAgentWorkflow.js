@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
  * - Handles API interactions
  * - Manages workflow execution state
  */
-export const useAgentWorkflow = () => {
+export const useWorkflow = () => {
   // Get the workflow context
   const workflowContext = useContext(WorkflowContext);
   
@@ -559,3 +559,6 @@ export const useAgentWorkflow = () => {
     autoLayoutWorkflow,
   };
 };
+
+// For backward compatibility
+export const useAgentWorkflow = useWorkflow;
