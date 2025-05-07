@@ -12,6 +12,7 @@ import sys
 import uuid
 import json
 import logging
+import re
 import chardet
 import pandas as pd
 import numpy as np
@@ -21,6 +22,7 @@ import operator
 import importlib
 from datetime import datetime
 from collections import namedtuple
+from copy import deepcopy
 
 # --- Core Dependencies ---
 from dotenv import dotenv_values
@@ -55,8 +57,11 @@ from langchain.document_loaders import (
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
+
+# --- Updated LangGraph Checkpoint ---
+# Import the new checkpointer from dedicated package
+from langgraph.checkpoint.memory import MemorySaver
 
 # --- Basic Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
@@ -282,6 +287,9 @@ class EmbeddingClient:
         
     def _get_direct_azure_client(self):
         try:
+            logger.info(f"Initializing Azure OpenAI client with endpoint: {self.azure_endpoint}, API version: {self.azure_api_version}")
+            logger.info(f"Using embedding model: {self.embeddings_model}")
+            
             token_provider = get_bearer_token_provider(
                 self.env.credential,
                 "https://cognitiveservices.azure.com/.default"
@@ -292,7 +300,7 @@ class EmbeddingClient:
                 azure_ad_token_provider=token_provider
             )
         except Exception as e:
-            logger.error(f"Error creating Azure OpenAI client: {e}")
+            logger.error(f"Error creating Azure OpenAI client: {e}", exc_info=True)
             # Fall back to API key if available
             api_key = self.env.get("AZURE_OPENAI_API_KEY")
             if api_key:
@@ -306,21 +314,31 @@ class EmbeddingClient:
     
     def generate_embeddings(self, doc: MyDocument) -> MyDocument:
         try:
+            logger.info(f"Generating embedding for document ID: {doc.id}")
+            logger.info(f"Using model: {self.embeddings_model}")
+            
             # Generate embedding for the document
             response = self.direct_azure_client.embeddings.create(
                 model=self.embeddings_model,
                 input=doc.text
             ).data[0].embedding
+            
+            logger.info(f"Successfully generated embedding of dimension: {len(response)}")
             doc.embedding = response
             return doc
         except Exception as e:
-            logger.error(f"Error generating embeddings: {e}")
+            logger.error(f"Error generating embeddings: {e}", exc_info=True)
+            # Add more debugging info
+            logger.error(f"Azure endpoint: {self.azure_endpoint}")
+            logger.error(f"API version: {self.azure_api_version}")
+            logger.error(f"Document text length: {len(doc.text)}")
             return doc
     
     def generate_embeddings_batch(self, docs: List[MyDocument]) -> List[MyDocument]:
         try:
             # Extract text from each document
             texts = [doc.text for doc in docs]
+            logger.info(f"Generating batch embeddings for {len(texts)} documents")
             
             # Generate embeddings in a batch
             response = self.direct_azure_client.embeddings.create(
@@ -332,9 +350,13 @@ class EmbeddingClient:
             for i, embedding_data in enumerate(response.data):
                 docs[i].embedding = embedding_data.embedding
             
+            logger.info(f"Successfully generated {len(response.data)} embeddings")
             return docs
         except Exception as e:
-            logger.error(f"Error generating batch embeddings: {e}")
+            logger.error(f"Error generating batch embeddings: {e}", exc_info=True)
+            # Add more debugging info
+            logger.error(f"Azure endpoint: {self.azure_endpoint}")
+            logger.error(f"API version: {self.azure_api_version}")
             return docs
     
     def get_langchain_embeddings(self):
@@ -376,6 +398,9 @@ class AzureLLMService:
             model_name = self.env.get("AZURE_OPENAI_CHAT_MODEL_NAME", deployment_name)
             api_version = self.env.get("AZURE_OPENAI_API_VERSION", "2023-05-15")
             azure_endpoint = self.env.get("AZURE_OPENAI_ENDPOINT")
+            
+            logger.info(f"Setting up Azure Chat OpenAI with deployment: {deployment_name}, model: {model_name}")
+            logger.info(f"API version: {api_version}, endpoint: {azure_endpoint}")
             
             # Get token provider from env credential
             token_provider = get_bearer_token_provider(
@@ -648,7 +673,13 @@ class RAGManager:
         """Create a LangChain retriever tool for a collection."""
         retriever = self.get_langchain_retriever(collection_name, search_k)
         
-        tool_name = tool_name or f"{collection_name}_retriever"
+        # Ensure tool name matches the allowed pattern
+        if tool_name:
+            tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+        else:
+            tool_name = f"{collection_name}_retriever"
+            tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+            
         description = description or f"Searches and returns documents from the {collection_name} knowledge base."
         
         return create_retriever_tool(
@@ -771,12 +802,22 @@ class ToolRegistry:
                         collection_name = tool_config.get("collection_name", "default")
                         search_k = tool_config.get("search_k", 3)
                         
+                        # Get sanitized tool name from config
+                        tool_name = config.get("name")
+                        if tool_name:
+                            tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+                        else:
+                            tool_name = f"{collection_name}_retriever"
+                            tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+                        
+                        description = config.get("description", f"Searches and returns documents from the {collection_name} knowledge base.")
+                        
                         # Create a retriever tool from the vector store
                         tool_instance = self.rag_manager.get_retriever_tool(
                             collection_name=collection_name,
                             search_k=search_k,
-                            tool_name=config.get("name", f"{tool_id}_retriever"),
-                            description=config.get("description", f"Searches and returns documents from the {collection_name} knowledge base.")
+                            tool_name=tool_name,
+                            description=description
                         )
                     else:
                         logger.warning(f"Cannot initialize ChromaDB tool '{tool_id}': RAG manager is not available.")
@@ -792,6 +833,12 @@ class ToolRegistry:
                     # Ensure it's a LangChain BaseTool
                     if isinstance(tool_instance, BaseTool):
                          # Use the tool_id from the config as the key
+                         # Ensure the tool name meets the pattern requirements
+                         original_name = tool_instance.name
+                         if not re.match(r'^[a-zA-Z0-9_\.-]+$', original_name):
+                             logger.warning(f"Tool name '{original_name}' contains invalid characters. Sanitizing...")
+                             tool_instance.name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', original_name)
+                             
                          self.initialized_tools[tool_id] = tool_instance
                          logger.info(f"Successfully initialized default tool: ID='{tool_id}' ({tool_type}) Name='{tool_instance.name}'")
                     else:
@@ -804,31 +851,48 @@ class ToolRegistry:
          """Initializes a tool based on a custom Python function."""
          module_path = config.get("module") # e.g., "formatters" (assuming it's in CUSTOM_TOOLS_DIR)
          func_name = config.get("function") # e.g., "format_as_markdown"
-         # Use name from config for the tool, default to tool_id
-         tool_name = config.get("name", tool_id)
-         tool_description = config.get("description", f"Custom tool {tool_name}")
+         
+         # Get sanitized tool name from the parent config
+         tool_name = self.tools_config.get(tool_id, {}).get("name")
+         if tool_name:
+             tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+         else:
+             tool_name = tool_id
+             tool_name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool_name)
+         
+         tool_description = self.tools_config.get(tool_id, {}).get("description", f"Custom tool {tool_name}")
+         
+         logger.info(f"Attempting to load custom function tool '{tool_id}': module='{module_path}', function='{func_name}', name='{tool_name}'")
+         logger.info(f"Current sys.path: {sys.path}")
 
          if not module_path or not func_name:
               logger.error(f"Custom function tool '{tool_id}' requires 'module' and 'function' in config.")
               return None
          try:
               # Dynamically import the module (already added to sys.path)
+              logger.info(f"Attempting to import module: {module_path}")
               module = importlib.import_module(module_path)
+              logger.info(f"Module '{module_path}' successfully imported")
+              
+              # Check what's in the module
+              logger.info(f"Available attributes in module '{module_path}': {dir(module)}")
+              
               func = getattr(module, func_name)
+              logger.info(f"Function '{func_name}' successfully found in module '{module_path}'")
 
               # Check if the function is already decorated with @lc_tool or is a BaseTool
               if isinstance(func, BaseTool):
                    logger.info(f"Loaded custom BaseTool '{tool_id}' from {module_path}.{func_name}")
-                   # Ensure the name matches the tool_id from config if possible
-                   if func.name != tool_name:
-                        logger.warning(f"Custom tool ID '{tool_id}' config name '{tool_name}' mismatches tool's internal name '{func.name}'. Using '{func.name}'.")
+                   # Update the name to match the sanitized tool name from config
+                   func.name = tool_name
                    return func # Already a LangChain tool
 
               elif hasattr(func, "langchain_tool_decorator"):
                    # If decorated with @lc_tool, it should be usable directly or provide access
                    logger.info(f"Loaded custom function tool '{tool_id}' (decorated) from {module_path}.{func_name}")
-                   # Wrap it explicitly to ensure name and description from config are used
-                   return Tool.from_function(func=func, name=tool_name, description=tool_description)
+                   # Create a new instance with the sanitized name
+                   tool = Tool.from_function(func=func, name=tool_name, description=tool_description)
+                   return tool
 
               else:
                    # Function is not decorated, wrap it manually
@@ -873,9 +937,10 @@ class ToolRegistry:
                    continue
               tool = self.get_tool(tool_id) # Use the ID from agents.json
               if tool:
-                   # Ensure the tool name used by the LLM matches the ID if possible
-                   if tool.name != tool_id:
-                        logger.warning(f"Tool ID '{tool_id}' in agent config differs from actual tool name '{tool.name}'. LLM will use '{tool.name}'.")
+                   # Ensure the tool name used by the LLM matches the pattern requirements
+                   if not re.match(r'^[a-zA-Z0-9_\.-]+$', tool.name):
+                        logger.warning(f"Tool name '{tool.name}' contains invalid characters. Sanitizing...")
+                        tool.name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool.name)
                    agent_tools.append(tool)
               else:
                    # Log the ID from agents.json that failed
@@ -918,7 +983,25 @@ class AgentNode:
         if self.tools and hasattr(self.llm, "bind_tools"):
              logger.info(f"Binding {len(self.tools)} tools to LLM for agent '{self.agent_id}'")
              try:
-                  self.llm_with_tools = self.llm.bind_tools(self.tools)
+                  # Ensure tool names meet the LLM requirements
+                  sanitized_tools = []
+                  for tool in self.tools:
+                       # Check if tool name meets pattern requirements
+                       if not re.match(r'^[a-zA-Z0-9_\.-]+$', tool.name):
+                            logger.warning(f"Tool name '{tool.name}' contains invalid characters. Sanitizing...")
+                            # Create a copy with sanitized name
+                            sanitized_tool = deepcopy(tool)
+                            sanitized_tool.name = re.sub(r'[^a-zA-Z0-9_\.-]', '_', tool.name)
+                            sanitized_tools.append(sanitized_tool)
+                       else:
+                            sanitized_tools.append(tool)
+                  
+                  if sanitized_tools:
+                       logger.info(f"Binding {len(sanitized_tools)} sanitized tools to LLM: {[t.name for t in sanitized_tools]}")
+                       self.llm_with_tools = self.llm.bind_tools(sanitized_tools)
+                  else:
+                       logger.warning("No valid tools to bind, proceeding without tools")
+                       self.llm_with_tools = self.llm
              except Exception as e:
                   logger.error(f"Failed to bind tools for agent '{self.agent_id}': {e}. Proceeding without bound tools.")
                   self.llm_with_tools = self.llm
@@ -1010,11 +1093,11 @@ class AgentNode:
 
         # Map the LLM's response content (if any) to the appropriate state field
         # Only map if there's actual content and no tool calls (tool results handled later)
-        if response_message.content and not response_message.tool_calls:
+        if response_message.content and not getattr(response_message, 'tool_calls', None):
             output_content = response_message.content if isinstance(response_message.content, str) else json.dumps(response_message.content)
             state_mapping_updates = self._map_output_to_state(output_content or "", state)
             updates.update(state_mapping_updates)
-        elif response_message.tool_calls:
+        elif getattr(response_message, 'tool_calls', None):
              logger.info(f"Agent '{self.agent_id}' generated tool calls. Content mapping skipped, routing to ToolNode.")
         else:
              logger.info(f"Agent '{self.agent_id}' response has no content and no tool calls.")
@@ -1214,13 +1297,15 @@ class WorkflowGraph:
 
         # 5. Compile the graph
         try:
-            checkpointer = SqliteSaver.from_conn_string(":memory:")
-        except AttributeError:
-            # Fallback for newer versions of LangGraph
-            from langgraph.checkpoint import MemorySaver
-            checkpointer = MemorySaver() # In-memory checkpointer for simplicity
-        self.compiled_graph = self.graph_builder.compile(checkpointer=checkpointer)
-        logger.info("LangGraph workflow compiled successfully.")
+            # Use MemorySaver from langgraph_checkpoint package
+            checkpointer = MemorySaver()
+            self.compiled_graph = self.graph_builder.compile(checkpointer=checkpointer)
+            logger.info("LangGraph workflow compiled successfully with MemorySaver.")
+        except Exception as e:
+            logger.warning(f"Error compiling with checkpointer: {e}. Compiling without checkpointer.")
+            # Compile without checkpointer as fallback
+            self.compiled_graph = self.graph_builder.compile()
+            logger.info("LangGraph workflow compiled successfully without checkpointer.")
 
     def _should_continue_or_use_tool(self, state: AgentState) -> Literal["continue", "tools"]:
         """Determines routing based on whether the last message has tool calls."""

@@ -2,7 +2,7 @@
     "chromadb_retriever": {
       "enabled": true,
       "type": "chromadb",
-      "name": "RAG Knowledge Base",
+      "name": "chromadb_retriever",
       "description": "Retrieves information from the vector database",
       "config": {
         "collection_name": "default",
@@ -12,7 +12,7 @@
     "markdown_formatter": {
       "enabled": true,
       "type": "custom_function",
-      "name": "Markdown Formatter",
+      "name": "markdown_formatter",
       "description": "Formats content in Markdown",
       "module": "formatters",
       "function": "format_as_markdown"
@@ -20,7 +20,7 @@
     "html_formatter": {
       "enabled": true,
       "type": "custom_function",
-      "name": "HTML Formatter",
+      "name": "html_formatter",
       "description": "Formats content in HTML",
       "module": "formatters",
       "function": "format_as_html"
@@ -28,7 +28,7 @@
     "grammar_checker": {
       "enabled": true,
       "type": "custom_function",
-      "name": "Grammar Checker",
+      "name": "grammar_checker",
       "description": "Checks and corrects grammar issues",
       "module": "checkers",
       "function": "check_grammar"
@@ -36,9 +36,41 @@
     "fact_checker": {
       "enabled": true,
       "type": "custom_function",
-      "name": "Fact Checker",
+      "name": "fact_checker",
       "description": "Verifies factual accuracy of content",
       "module": "checkers",
       "function": "check_facts"
+    },
+    "json_formatter": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "json_formatter",
+      "description": "Formats content as structured JSON",
+      "module": "formatters",
+      "function": "format_as_json"
+    },
+    "table_formatter": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "table_formatter",
+      "description": "Creates formatted tables from data",
+      "module": "formatters",
+      "function": "format_as_table"
+    },
+    "readability_checker": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "readability_checker",
+      "description": "Analyzes text readability using standard metrics",
+      "module": "checkers",
+      "function": "check_readability"
+    },
+    "coherence_checker": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "coherence_checker",
+      "description": "Checks document coherence, flow and structure",
+      "module": "checkers",
+      "function": "check_coherence"
     }
   }

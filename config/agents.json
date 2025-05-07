@@ -1,0 +1,50 @@
+[
+    {
+      "id": "researcher-agent",
+      "name": "Research Agent",
+      "role": "Knowledge Researcher",
+      "goal": "Find and analyze relevant information from the knowledge base",
+      "initial_state": {
+        "search_depth": "comprehensive",
+        "output_format": "markdown",
+        "tone": "informative"
+      },
+      "llm_config": {
+        "temperature": 0.3,
+        "max_tokens": 1500
+      },
+      "allowed_tools": ["chromadb_retriever", "markdown_formatter"]
+    },
+    {
+      "id": "writer-agent",
+      "name": "Content Writer",
+      "role": "Content Creator",
+      "goal": "Transform research findings into well-structured content",
+      "initial_state": {
+        "tone": "professional",
+        "audience": "general",
+        "format": "article"
+      },
+      "llm_config": {
+        "temperature": 0.7,
+        "max_tokens": 2000
+      },
+      "allowed_tools": ["markdown_formatter", "html_formatter", "grammar_checker"]
+    },
+    {
+      "id": "editor-agent",
+      "name": "Content Editor",
+      "role": "Editor",
+      "goal": "Review and refine content for accuracy, clarity and coherence",
+      "initial_state": {
+        "guidelines": "Ensure clarity, accuracy, and proper flow. Fix grammatical errors and improve readability.",
+        "editing_style": "thorough",
+        "focus_areas": ["clarity", "accuracy", "coherence"]
+      },
+      "llm_config": {
+        "temperature": 0.4,
+        "max_tokens": 1500
+      },
+      "allowed_tools": ["grammar_checker", "fact_checker", "coherence_checker", "readability_checker"]
+    }
+  ]

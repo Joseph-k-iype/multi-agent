@@ -1,0 +1,25 @@
+{
+    "entry_point": "researcher-agent",
+    "finish_point": "editor-agent",
+    "nodes": [
+      {
+        "id": "researcher-agent"
+      },
+      {
+        "id": "writer-agent"
+      },
+      {
+        "id": "editor-agent"
+      }
+    ],
+    "edges": [
+      {
+        "source": "researcher-agent",
+        "target": "writer-agent"
+      },
+      {
+        "source": "writer-agent",
+        "target": "editor-agent"
+      }
+    ]
+  }
