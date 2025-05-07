@@ -221,14 +221,14 @@ class OSEnv:
                 ad_password = self.get("AD_USER_PW")
                 proxy_domain = self.get("HTTPS_PROXY_DOMAIN")
                 if all([ad_username, ad_password, proxy_domain]):
-                    proxy_url = f"https://{ad_username}:{ad_password}@{proxy_domain}"
+                    proxy_url = f"http://{ad_username}:{ad_password}{proxy_domain}"
                 else:
                     # Try alternative format
                     proxy_user = self.get("PROXY_USER")
                     proxy_password = self.get("PROXY_PASSWORD")
                     proxy_domain = self.get("PROXY_DOMAIN")
                     if all([proxy_user, proxy_password, proxy_domain]):
-                        proxy_url = f"https://{proxy_user}:{proxy_password}@{proxy_domain}"
+                        proxy_url = f"http://{proxy_user}:{proxy_password}{proxy_domain}"
             
             if proxy_url:
                 self.set("HTTP_PROXY", proxy_url, print_val=False)
