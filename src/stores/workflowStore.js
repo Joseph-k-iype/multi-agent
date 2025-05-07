@@ -35,13 +35,25 @@ export const useWorkflowStore = create((set, get) => ({
   },
   
   updateNode: (nodeId, newData) => {
-    set((state) => ({
-      nodes: state.nodes.map((node) => 
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, ...newData } }
-          : node
-      )
-    }));
+    set(state => {
+      // Create a new nodes array with the updated node
+      const updatedNodes = state.nodes.map(node => {
+        if (node.id === nodeId) {
+          // Create a completely new object to ensure React detects the change
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              ...newData
+            }
+          };
+        }
+        return node;
+      });
+      
+      // Return a new state object
+      return { nodes: updatedNodes };
+    });
   },
   
   removeNode: (nodeId) => {

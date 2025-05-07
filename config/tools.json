@@ -1,0 +1,44 @@
+{
+    "chromadb_retriever": {
+      "enabled": true,
+      "type": "chromadb",
+      "name": "RAG Knowledge Base",
+      "description": "Retrieves information from the vector database",
+      "config": {
+        "collection_name": "default",
+        "search_k": 3
+      }
+    },
+    "markdown_formatter": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "Markdown Formatter",
+      "description": "Formats content in Markdown",
+      "module": "formatters",
+      "function": "format_as_markdown"
+    },
+    "html_formatter": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "HTML Formatter",
+      "description": "Formats content in HTML",
+      "module": "formatters",
+      "function": "format_as_html"
+    },
+    "grammar_checker": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "Grammar Checker",
+      "description": "Checks and corrects grammar issues",
+      "module": "checkers",
+      "function": "check_grammar"
+    },
+    "fact_checker": {
+      "enabled": true,
+      "type": "custom_function",
+      "name": "Fact Checker",
+      "description": "Verifies factual accuracy of content",
+      "module": "checkers",
+      "function": "check_facts"
+    }
+  }

@@ -1213,7 +1213,12 @@ class WorkflowGraph:
 
 
         # 5. Compile the graph
-        checkpointer = SqliteSaver.from_conn_string(":memory:") # In-memory checkpointer for simplicity
+        try:
+            checkpointer = SqliteSaver.from_conn_string(":memory:")
+        except AttributeError:
+            # Fallback for newer versions of LangGraph
+            from langgraph.checkpoint import MemorySaver
+            checkpointer = MemorySaver() # In-memory checkpointer for simplicity
         self.compiled_graph = self.graph_builder.compile(checkpointer=checkpointer)
         logger.info("LangGraph workflow compiled successfully.")
 
